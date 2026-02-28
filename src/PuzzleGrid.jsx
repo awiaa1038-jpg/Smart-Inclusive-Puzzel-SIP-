@@ -1,0 +1,281 @@
+import React, { useEffect, useState, useRef } from 'react'
+import { saveScoreToFirebase } from './firebaseOptional'
+
+function speak(text) {
+  if (!window.speechSynthesis) return
+  const u = new SpeechSynthesisUtterance(text)
+  window.speechSynthesis.cancel()
+  window.speechSynthesis.speak(u)
+}
+
+// Improved Indonesian + English spoken-number parser (basic)
+function parseIndoNumberWords(text){
+  if(!text) return NaN
+  const t = text.toLowerCase().replace(/[^a-z0-9\s-]/g,' ').trim()
+  const units = {
+    nol: 0,
+    kosong: 0,
+    satu: 1,
+    due: 2,
+    duea: 2, // possible mis-spellings
+    dua: 2,
+    tiga: 3,
+    empat: 4,
+    lima: 5,
+    enam: 6,
+    tujuh: 7,
+    delapan: 8,
+    sembilan: 9
+  }
+  const specials = { sepuluh:10,sebelas:11,belas:10 }
+  // simple english map
+  const enUnits = { zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12 }
+
+  // direct digits
+  const digits = text.match(/\d+/)?.[0]
+  if(digits) return Number(digits)
+
+  // handle 'dua puluh tiga' or 'twenty three' roughly
+  // try indonesian
+  if(/puluh|belas|sepuluh|sebelas/.test(t)){
+    const parts = t.split(/\s+/)
+    let value = 0
+    for(let i=0;i<parts.length;i++){
+      const w = parts[i]
+      if(w === 'sebelas') { value += 11; continue }
+      if(w === 'sepuluh') { value += 10; continue }
+      if(w === 'belas') { value += 10; continue }
+      if(w === 'puluh') {
+        const prev = parts[i-1]
+        const pv = units[prev] ?? enUnits[prev] ?? 0
+        value += pv * 10
+        continue
+      }
+      const u = units[w] ?? enUnits[w]
+      if(typeof u === 'number') value += u
+    }
+    if(value>0) return value
+  }
+
+  // fallback: single-word map
+  const w = t.split(/\s+/)[0]
+  if(units[w] !== undefined) return units[w]
+  if(enUnits[w] !== undefined) return enUnits[w]
+  return NaN
+}
+
+function normalizeSpokenNumber(text){
+  if(!text) return NaN
+  const v = parseIndoNumberWords(text)
+  if(!isNaN(v)) return v
+  return NaN
+}
+
+function createRecognition(onResult) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (!SpeechRecognition) return null
+  const r = new SpeechRecognition()
+  r.lang = 'id-ID'
+  r.interimResults = false
+  r.maxAlternatives = 1
+  r.onresult = (e) => {
+    const txt = e.results[0][0].transcript.trim()
+    onResult(txt)
+  }
+  r.onerror = () => {}
+  return r
+}
+
+const POSSIBLE_IMAGES = [
+  '/puzzle.jpg',
+  '/puzzle.png',
+  '/puzzle.jpeg',
+  '/Smart Inclusive Puzzle (SIP) (1).png',
+  '/Smart%20Inclusive%20Puzzle%20(SIP)%20(1).png',
+  '/puzzle-placeholder.svg'
+]
+
+async function findFirstExistingImage(list){
+  for(const p of list){
+    const url = encodeURI(p)
+    try{
+      // try load image
+      await new Promise((res, rej)=>{
+        const img = new Image()
+        img.onload = () => res(true)
+        img.onerror = () => rej(false)
+        img.src = url
+      })
+      return url
+    }catch(e){/* try next */}
+  }
+  return ''
+}
+
+export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplete }) {
+  const [pieces, setPieces] = useState(
+    questions.map((q) => ({ ...q, placed: false }))
+  )
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const recognitionRef = useRef(null)
+  const timerRef = useRef(null)
+  const [imageUrl, setImageUrl] = useState('/puzzle-placeholder.svg')
+  const [srMessage, setSrMessage] = useState('')
+
+  useEffect(()=>{
+    findFirstExistingImage(POSSIBLE_IMAGES).then(u=>{ if(u) setImageUrl(u) })
+  },[])
+
+  useEffect(() => {
+    recognitionRef.current = createRecognition(handleVoiceResult)
+    return () => {
+      if (recognitionRef.current) recognitionRef.current.stop()
+      clearTimeout(timerRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pieces])
+
+  useEffect(() => {
+    if (mode === 'read-aloud') startAutoPlay()
+    return () => clearTimeout(timerRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, currentIndex, timerMs])
+
+  function speakAndAnnounce(text){
+    setSrMessage(text)
+    speak(text)
+  }
+
+  function startAutoPlay() {
+    if (currentIndex >= pieces.length) return
+    const p = pieces[currentIndex]
+    if (p.placed) {
+      setCurrentIndex((i) => i + 1)
+      return
+    }
+    speakAndAnnounce(p.question)
+    startListening()
+    const timeout = timerMs
+    timerRef.current = setTimeout(() => {
+      stopListening()
+      setCurrentIndex((i) => i + 1)
+    }, timeout)
+  }
+
+  function startListening() {
+    const r = recognitionRef.current
+    try {
+      r && r.start()
+    } catch (e) {}
+  }
+  function stopListening() {
+    const r = recognitionRef.current
+    try {
+      r && r.stop()
+    } catch (e) {}
+  }
+
+  function handleVoiceResult(text) {
+    // normalize spoken number into numeric value
+    const num = normalizeSpokenNumber(text)
+    const expected = pieces[currentIndex]?.answer
+    if (!isNaN(num) && num === expected) {
+      speakAndAnnounce('Benar')
+      placePiece(pieces[currentIndex].id)
+      clearTimeout(timerRef.current)
+      setCurrentIndex((i) => i + 1)
+    } else {
+      speakAndAnnounce('Coba lagi')
+    }
+  }
+
+  function placePiece(id) {
+    setPieces((prev) => {
+      const next = prev.map((p) => (p.id === id ? { ...p, placed: true } : p))
+      if(next.every(x=>x.placed)){
+        const score = next.filter(x=>x.placed).length
+        const entry = { score, date: new Date().toISOString() }
+        // localStorage already handled in App; also try Firebase
+        saveScoreToFirebase(entry).catch(()=>{})
+        if(typeof onComplete === 'function') onComplete(score)
+      }
+      return next
+    })
+  }
+
+  // `idx` is the index in the `pieces` array. the previous implementation
+  // treated the parameter as an `id` and then searched for it with
+  // `find`. that worked only when `id === index` which isn't guaranteed
+  // when questions are imported with custom ids. using the index directly
+  // avoids potential mismatch/undefined behavior.
+  function handleManualAnswer(idx) {
+    const p = pieces[idx]
+    if (!p) return
+    speakAndAnnounce(p.question)
+    if (mode === 'self-read') startListening()
+  }
+
+  const gridSize = 4
+
+  function handleKeyDown(e, idx){
+    if(e.key === 'Enter' || e.key === ' '){
+      e.preventDefault()
+      handleManualAnswer(idx)
+    }
+  }
+
+  return (
+    <div className="puzzle-wrapper">
+      <div aria-live="polite" role="status" className="sr-only">{srMessage}</div>
+      <div className="puzzle-board" role="application" aria-label="Puzzle board">
+        {pieces.map((p, idx) => {
+          const row = Math.floor(idx / gridSize)
+          const col = idx % gridSize
+          const bgX = (-col * 25) + '%'
+          const bgY = (-row * 25) + '%'
+          return (
+            <div
+              key={p.id}
+              tabIndex={0}
+              onKeyDown={(e)=>handleKeyDown(e, idx)}
+              className={`puzzle-piece ${p.placed ? 'placed' : ''}`}
+              style={{
+                backgroundImage: `url('${imageUrl}')`,
+                backgroundSize: '400% 400% ',
+                backgroundPosition: `${bgX} ${bgY}`
+              }}
+              onClick={() => handleManualAnswer(idx)}
+              aria-label={`Keping ${idx + 1}, angka ${p.number}`}
+            >
+              <div className="overlay">
+                <div className="number">{p.number}</div>
+                <button className="qbtn" aria-hidden>Soal</button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="controls">
+        <button
+          onClick={() => {
+            // start listening for current question
+            if (mode === 'self-read') {
+              handleManualAnswer(currentIndex)
+            } else {
+              startAutoPlay()
+            }
+          }}
+        >
+          Mulai Soal
+        </button>
+      </div>
+
+      {pieces.every((p) => p.placed) && (
+        <div className="complete">Selamat! Semua keping tersusun.</div>
+      )}
+    </div>
+  )
+}
+
+
