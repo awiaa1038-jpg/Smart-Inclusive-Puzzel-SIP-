@@ -71,18 +71,18 @@ function normalizeSpokenNumber(text){
   return NaN
 }
 
-function createRecognition(onResult) {
+function createRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
   if (!SpeechRecognition) return null
   const r = new SpeechRecognition()
   r.lang = 'id-ID'
+  // we only expect one result per start call, don't keep listening
   r.interimResults = false
   r.maxAlternatives = 1
-  r.onresult = (e) => {
-    const txt = e.results[0][0].transcript.trim()
-    onResult(txt)
+  r.continuous = false
+  r.onerror = (e) => {
+    console.warn('speech recognition error', e)
   }
-  r.onerror = () => {}
   return r
 }
 
@@ -118,6 +118,8 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
   )
   const [currentIndex, setCurrentIndex] = useState(0)
   const recognitionRef = useRef(null)
+  // useRef allows us to refer to latest state in the handler without
+  // needing to recreate the recognition object constantly
   const timerRef = useRef(null)
   const [imageUrl, setImageUrl] = useState('/puzzle-placeholder.svg')
   const [srMessage, setSrMessage] = useState('')
@@ -126,14 +128,17 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     findFirstExistingImage(POSSIBLE_IMAGES).then(u=>{ if(u) setImageUrl(u) })
   },[])
 
+  // create recognition once on mount; we will update its onresult callback
+  // whenever the relevant state changes. doing this prevents a race where the
+  // user clicks "Mulai Soal" before the effect runs, which previously left
+  // recognitionRef.current null and the startListening call did nothing.
   useEffect(() => {
-    recognitionRef.current = createRecognition(handleVoiceResult)
+    recognitionRef.current = createRecognition()
     return () => {
       if (recognitionRef.current) recognitionRef.current.stop()
       clearTimeout(timerRef.current)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pieces])
+  }, [])
 
   useEffect(() => {
     if (mode === 'read-aloud') startAutoPlay()
@@ -162,11 +167,25 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     }, timeout)
   }
 
+  function ensureRecognition() {
+    if (!recognitionRef.current) {
+      recognitionRef.current = createRecognition()
+    }
+    return recognitionRef.current
+  }
+
   function startListening() {
-    const r = recognitionRef.current
+    const r = ensureRecognition()
+    if (!r) {
+      console.warn('speech recognition not supported')
+      setSrMessage('Speech recognition tidak tersedia di peramban ini')
+      return
+    }
     try {
-      r && r.start()
-    } catch (e) {}
+      r.start()
+    } catch (e) {
+      console.warn('could not start speech recognition', e)
+    }
   }
   function stopListening() {
     const r = recognitionRef.current
@@ -175,7 +194,9 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     } catch (e) {}
   }
 
-  function handleVoiceResult(text) {
+  // We will wrap this in useCallback so we can update the recognition
+  // object's onresult whenever it changes without recreating the object.
+  const handleVoiceResult = React.useCallback((text) => {
     // normalize spoken number into numeric value
     const num = normalizeSpokenNumber(text)
     const expected = pieces[currentIndex]?.answer
@@ -187,7 +208,7 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     } else {
       speakAndAnnounce('Coba lagi')
     }
-  }
+  }, [pieces, currentIndex])
 
   function placePiece(id) {
     setPieces((prev) => {
@@ -216,6 +237,18 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
   }
 
   const gridSize = 4
+
+  // whenever our voice handler changes (due to state updates), reassign it
+  // to the recognition object so it sees the fresh closure
+  useEffect(() => {
+    const r = recognitionRef.current
+    if (r) {
+      r.onresult = (e) => {
+        const txt = e.results[0][0].transcript.trim()
+        handleVoiceResult(txt)
+      }
+    }
+  }, [handleVoiceResult])
 
   function handleKeyDown(e, idx){
     if(e.key === 'Enter' || e.key === ' '){
