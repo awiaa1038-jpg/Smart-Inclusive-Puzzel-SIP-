@@ -190,8 +190,10 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
   function stopListening() {
     const r = recognitionRef.current
     try {
-      r && r.stop()
-    } catch (e) {}
+      if (r) r.stop()
+    } catch (e) {
+      console.warn('could not stop recognition', e)
+    }
   }
 
   // We will wrap this in useCallback so we can update the recognition
@@ -201,12 +203,23 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     const num = normalizeSpokenNumber(text)
     const expected = pieces[currentIndex]?.answer
     if (!isNaN(num) && num === expected) {
+      // answer is correct! stop listening, mark piece, advance
+      stopListening()
       speakAndAnnounce('Benar')
       placePiece(pieces[currentIndex].id)
       clearTimeout(timerRef.current)
+      // trigger next question by incrementing index
       setCurrentIndex((i) => i + 1)
     } else {
+      // answer incorrect; restart listening (or let user try again)
       speakAndAnnounce('Coba lagi')
+      // optionally restart listening for next attempt
+      try {
+        const r = recognitionRef.current
+        if (r) r.start()
+      } catch (e) {
+        console.warn('could not restart recognition', e)
+      }
     }
   }, [pieces, currentIndex])
 
@@ -244,8 +257,11 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     const r = recognitionRef.current
     if (r) {
       r.onresult = (e) => {
-        const txt = e.results[0][0].transcript.trim()
-        handleVoiceResult(txt)
+        if (e.results && e.results.length > 0) {
+          const txt = e.results[0][0].transcript.trim()
+          console.log('Speech recognized:', txt)
+          handleVoiceResult(txt)
+        }
       }
     }
   }, [handleVoiceResult])
@@ -257,36 +273,74 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     }
   }
 
+  // separate placed and unplaced pieces
+  const unplacedPieces = pieces.filter(p => !p.placed)
+  const placedMap = {}
+  pieces.forEach(p => {
+    if (p.placed && p.targetIndex !== undefined) {
+      placedMap[p.targetIndex] = p
+    }
+  })
+
   return (
     <div className="puzzle-wrapper">
       <div aria-live="polite" role="status" className="sr-only">{srMessage}</div>
+      
       <div className="puzzle-board" role="application" aria-label="Puzzle board">
-        {pieces.map((p, idx) => {
-          const row = Math.floor(idx / gridSize)
-          const col = idx % gridSize
+        {Array.from({ length: 16 }).map((_, gridIdx) => {
+          const piece = placedMap[gridIdx]
+          if (!piece) {
+            return <div key={`empty-${gridIdx}`} className="puzzle-slot-empty" aria-label={`Posisi ${gridIdx + 1} kosong`}></div>
+          }
+          
+          const row = Math.floor(gridIdx / gridSize)
+          const col = gridIdx % gridSize
           const bgX = (-col * 25) + '%'
           const bgY = (-row * 25) + '%'
+          
           return (
             <div
-              key={p.id}
-              tabIndex={0}
-              onKeyDown={(e)=>handleKeyDown(e, idx)}
-              className={`puzzle-piece ${p.placed ? 'placed' : ''}`}
+              key={piece.id}
+              className="puzzle-piece placed"
               style={{
                 backgroundImage: `url('${imageUrl}')`,
-                backgroundSize: '400% 400% ',
+                backgroundSize: '400% 400%',
                 backgroundPosition: `${bgX} ${bgY}`
               }}
-              onClick={() => handleManualAnswer(idx)}
-              aria-label={`Keping ${idx + 1}, angka ${p.number}`}
+              aria-label={`Keping ${piece.number} tersusun di posisi ${gridIdx + 1}`}
             >
               <div className="overlay">
-                <div className="number">{p.number}</div>
-                <button className="qbtn" aria-hidden>Soal</button>
+                <div className="number">{piece.number}</div>
               </div>
             </div>
           )
         })}
+      </div>
+
+      <div className="hand-area">
+        <div className="hand-label">Kepingan untuk menjawab:</div>
+        <div className="hand-pieces">
+          {unplacedPieces.map((p, uIdx) => {
+            return (
+              <div
+                key={p.id}
+                tabIndex={0}
+                className="puzzle-piece-hand"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    handleManualAnswer(pieces.indexOf(p))
+                  }
+                }}
+                onClick={() => handleManualAnswer(pieces.indexOf(p))}
+                aria-label={`Keping dengan angka ${p.number}, soal: ${p.question}`}
+              >
+                <div className="number">{p.number}</div>
+                <button className="qbtn" aria-hidden>Soal</button>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       <div className="controls">
