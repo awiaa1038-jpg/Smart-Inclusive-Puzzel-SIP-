@@ -13,35 +13,35 @@ export const QUESTIONS = [
   {
     id: 1,
     question: `Bayangkan kamu memiliki sebuah robot ajaib yang bisa membantumu di rumah. Tuliskan 3 hal yang ingin kamu suruh robot itu lakukan dan berikan alasannya!`,
-    answer: true,
+    answer: 5,
     number: 2,
     targetIndex: 1
   },
   {
     id: 2,
     question: `Mengapa tumbuhan sangat penting bagi kehidupan manusia dan hewan di bumi? Sebutkan setidaknya dua alasan yang kamu ketahui!`,
-    answer: true,
+    answer: 90,
     number: 3,
     targetIndex: 2
   },
   {
     id: 3,
     question: `Andi mulai belajar pada pukul 18.30 dan selesai pada pukul 20.15. Berapa menit total waktu yang dihabiskan Andi untuk belajar? Tunjukkan langkah-langkah hitungannya!`,
-    answer: 105,
+    answer: 48,
     number: 4,
     targetIndex: 3
   },
   {
     id: 4,
     question: `Jika kamu melihat seorang teman yang sedang sedih karena kehilangan pensil kesayangannya di kelas, apa yang akan kamu lakukan untuk menghiburnya?`,
-    answer: true,
+    answer: 8,
     number: 5,
     targetIndex: 4
   },
   {
     id: 5,
     question: `Sebutkan 3 nama provinsi di Indonesia beserta nama ibu kotanya masing-masing yang kamu ketahui!`,
-    answer: true,
+    answer: 20,
     number: 6,
     targetIndex: 5
   }

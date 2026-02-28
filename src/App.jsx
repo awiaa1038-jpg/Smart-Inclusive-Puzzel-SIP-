@@ -7,7 +7,6 @@ import Admin from './Admin'
 
 export default function App() {
   const [mode, setMode] = useState('read-aloud') // 'read-aloud' or 'self-read'
-  const [timerMs, setTimerMs] = useState(20000)
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS)
   const [showAdmin, setShowAdmin] = useState(false)
 
@@ -24,7 +23,7 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>Inclusive Puzzle</h1>
+        <h1>Smart Inclusive Puzzle</h1>
         <div className="mode-select">
           <label>
             <input
@@ -47,14 +46,14 @@ export default function App() {
         </div>
       </header>
 
-      <Controls timerMs={timerMs} setTimerMs={setTimerMs} setQuestions={setQuestions} setShowAdmin={setShowAdmin} />
+      <Controls setShowAdmin={setShowAdmin} />
 
       {showAdmin ? (
         <Admin onClose={() => setShowAdmin(false)} />
       ) : (
         <>
           <main>
-            <PuzzleGrid questions={questions} mode={mode} timerMs={timerMs} onComplete={handleComplete} />
+            <PuzzleGrid questions={questions} mode={mode} onComplete={handleComplete} />
           </main>
 
           <aside>

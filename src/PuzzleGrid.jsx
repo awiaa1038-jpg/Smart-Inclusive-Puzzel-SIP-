@@ -87,11 +87,11 @@ function createRecognition() {
 }
 
 const POSSIBLE_IMAGES = [
+  '/Smart Inclusive Puzzle (SIP) (1).png',
+  '/Smart%20Inclusive%20Puzzle%20(SIP)%20(1).png',
   '/puzzle.jpg',
   '/puzzle.png',
   '/puzzle.jpeg',
-  '/Smart Inclusive Puzzle (SIP) (1).png',
-  '/Smart%20Inclusive%20Puzzle%20(SIP)%20(1).png',
   '/puzzle-placeholder.svg'
 ]
 
@@ -112,7 +112,7 @@ async function findFirstExistingImage(list){
   return ''
 }
 
-export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplete }) {
+export default function PuzzleGrid({ questions, mode, onComplete }) {
   const [pieces, setPieces] = useState(
     questions.map((q) => ({ ...q, placed: false }))
   )
@@ -142,13 +142,15 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     }
   }, [])
 
-  useEffect(() => {
-    if (mode === 'read-aloud') startAutoPlay()
-    return () => clearTimeout(timerRef.current)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, currentIndex, timerMs])
+  // old autoplay effect removed; we manage questions via startGame/nextQuestion
 
   function speakAndAnnounce(text){
+    // if user selected self-read mode, remain entirely silent (just update
+    // the screen-reader message) and never call speechSynthesis.
+    if(mode === 'self-read'){
+      setSrMessage(text)
+      return
+    }
     setSrMessage(text)
     speak(text)
   }
@@ -216,11 +218,11 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     }
     speakAndAnnounce(p.question)
     startListening()
-    const timeout = timerMs
-    timerRef.current = setTimeout(() => {
-      stopListening()
-      setCurrentIndex((i) => i + 1)
-    }, timeout)
+    // legacy autoplay timeout not used
+    // timerRef.current = setTimeout(() => {
+    //   stopListening()
+    //   setCurrentIndex((i) => i + 1)
+    // }, timerMs)
   }
 
   function ensureRecognition() {
@@ -320,6 +322,10 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     }
   }, [handleVoiceResult])
 
+  // Do not auto-manage listening here; voice control is started explicitly
+  // via the `startGame()` / `startCountdown()` flows to avoid ambient
+  // mis-detections. This space is intentionally left blank.
+
   function handleKeyDown(e, idx){
     if(e.key === 'Enter' || e.key === ' '){
       e.preventDefault()
@@ -375,18 +381,19 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
         <div className="hand-label">Kepingan untuk menjawab:</div>
         <div className="hand-pieces">
           {unplacedPieces.map((p, uIdx) => {
+            const row = Math.floor(p.targetIndex / gridSize)
+            const col = p.targetIndex % gridSize
+            const bgX = (-col * 25) + '%'
+            const bgY = (-row * 25) + '%'
             return (
               <div
                 key={p.id}
-                tabIndex={0}
                 className="puzzle-piece-hand"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    handleManualAnswer(pieces.indexOf(p))
-                  }
+                style={{
+                  backgroundImage: `url('${imageUrl}')`,
+                  backgroundSize: '400% 400%',
+                  backgroundPosition: `${bgX} ${bgY}`
                 }}
-                onClick={() => handleManualAnswer(pieces.indexOf(p))}
                 aria-label={`Keping dengan angka ${p.number}, soal: ${p.question}`}
               >
                 <div className="number">{p.number}</div>
@@ -397,11 +404,6 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
         </div>
       </div>
 
-      <div className="controls">
-        <button onClick={startGame}>
-          Mulai Soal
-        </button>
-      </div>
 
       {pieces.every((p) => p.placed) && (
         <div className="complete">Selamat! Semua keping tersusun.</div>
