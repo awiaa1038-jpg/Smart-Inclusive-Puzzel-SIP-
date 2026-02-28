@@ -1,0 +1,2 @@
+Applying: add greeting, confirm on load, make speak forced, add selectable question timeout in header, mic indicator and restart, improve numeric parsing fallback, style tweaks.
+Files changed: src/PuzzleGrid.jsx, src/App.jsx, src/styles.css
