@@ -117,6 +117,8 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     questions.map((q) => ({ ...q, placed: false }))
   )
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [gameStage, setGameStage] = useState('idle') // idle, confirm, countdown, playing, done
+  const [countdownSec, setCountdownSec] = useState(5)
   const recognitionRef = useRef(null)
   // useRef allows us to refer to latest state in the handler without
   // needing to recreate the recognition object constantly
@@ -151,7 +153,61 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     speak(text)
   }
 
+  // control flow helpers
+  function startGame(){
+    if(gameStage !== 'idle') return
+    setGameStage('confirm')
+    speakAndAnnounce('Mulai sekarang?')
+    startListening()
+  }
+
+  function startCountdown(){
+    setGameStage('countdown')
+    let sec = 5
+    function tick(){
+      if(sec < 0){
+        setGameStage('playing')
+        nextQuestion()
+        return
+      }
+      speakAndAnnounce(String(sec))
+      sec--
+      setTimeout(tick, 1000)
+    }
+    tick()
+  }
+
+  function nextQuestion(){
+    if(currentIndex >= pieces.length){
+      speakAndAnnounce('Semua soal selesai. Terima kasih!')
+      setGameStage('done')
+      return
+    }
+    setGameStage('playing')
+    const q = pieces[currentIndex]
+    speakAndAnnounce(q.question)
+    startListening()
+    timerRef.current = setTimeout(() => {
+      speakAndAnnounce('Waktu habis, mulai ulang dari awal')
+      restartGame()
+    }, 100000)
+  }
+
+  function isAffirmative(txt){
+    if(!txt) return false
+    const t=txt.toLowerCase()
+    return /\b(iya|ya|mulai|oke|ok)\b/.test(t)
+  }
+
+  function restartGame(){
+    // reset pieces and index
+    setPieces((prev)=>prev.map(p=>({ ...p, placed:false })))
+    setCurrentIndex(0)
+    setGameStage('idle')
+  }
+
   function startAutoPlay() {
+    // deprecated in new flow; kept for compatibility
     if (currentIndex >= pieces.length) return
     const p = pieces[currentIndex]
     if (p.placed) {
@@ -174,18 +230,14 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
     return recognitionRef.current
   }
 
-  function startListening() {
+  function startListening(){
     const r = ensureRecognition()
-    if (!r) {
+    if(!r){
       console.warn('speech recognition not supported')
       setSrMessage('Speech recognition tidak tersedia di peramban ini')
       return
     }
-    try {
-      r.start()
-    } catch (e) {
-      console.warn('could not start speech recognition', e)
-    }
+    try{ r.start() }catch(e){ console.warn('could not start speech recognition',e) }
   }
   function stopListening() {
     const r = recognitionRef.current
@@ -199,29 +251,31 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
   // We will wrap this in useCallback so we can update the recognition
   // object's onresult whenever it changes without recreating the object.
   const handleVoiceResult = React.useCallback((text) => {
-    // normalize spoken number into numeric value
-    const num = normalizeSpokenNumber(text)
-    const expected = pieces[currentIndex]?.answer
-    if (!isNaN(num) && num === expected) {
-      // answer is correct! stop listening, mark piece, advance
-      stopListening()
-      speakAndAnnounce('Benar')
-      placePiece(pieces[currentIndex].id)
-      clearTimeout(timerRef.current)
-      // trigger next question by incrementing index
-      setCurrentIndex((i) => i + 1)
-    } else {
-      // answer incorrect; restart listening (or let user try again)
-      speakAndAnnounce('Coba lagi')
-      // optionally restart listening for next attempt
-      try {
-        const r = recognitionRef.current
-        if (r) r.start()
-      } catch (e) {
-        console.warn('could not restart recognition', e)
+    console.log('voiceResult', text, gameStage)
+    if(gameStage === 'confirm'){
+      if(isAffirmative(text)){
+        startCountdown()
+      } else {
+        speakAndAnnounce('Silakan tekan tombol jika ingin mulai')
+      }
+    } else if(gameStage === 'playing'){
+      const q = pieces[currentIndex]
+      if(!q) return
+      const num = normalizeSpokenNumber(text)
+      const correct = typeof q.answer === 'number' ? (num === q.answer) : (q.answer === true ? !!text.trim() : text.toLowerCase().includes(String(q.answer).toLowerCase()))
+      if(correct){
+        stopListening()
+        speakAndAnnounce('Anda benar')
+        placePiece(q.id)
+        clearTimeout(timerRef.current)
+        setCurrentIndex(i => i+1)
+        nextQuestion()
+      } else {
+        speakAndAnnounce('Maaf anda salah, mulai ulang dari awal ya..')
+        restartGame()
       }
     }
-  }, [pieces, currentIndex])
+  }, [pieces, currentIndex, gameStage])
 
   function placePiece(id) {
     setPieces((prev) => {
@@ -344,16 +398,7 @@ export default function PuzzleGrid({ questions, mode, timerMs = 20000, onComplet
       </div>
 
       <div className="controls">
-        <button
-          onClick={() => {
-            // start listening for current question
-            if (mode === 'self-read') {
-              handleManualAnswer(currentIndex)
-            } else {
-              startAutoPlay()
-            }
-          }}
-        >
+        <button onClick={startGame}>
           Mulai Soal
         </button>
       </div>
