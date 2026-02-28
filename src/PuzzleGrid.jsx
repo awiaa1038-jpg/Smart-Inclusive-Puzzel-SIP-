@@ -57,10 +57,12 @@ function parseIndoNumberWords(text){
     if(value>0) return value
   }
 
-  // fallback: single-word map
-  const w = t.split(/\s+/)[0]
-  if(units[w] !== undefined) return units[w]
-  if(enUnits[w] !== undefined) return enUnits[w]
+  // fallback: scan all words for a known number (handles "number satu", "dua please", etc.)
+  const parts = t.split(/\s+/)
+  for(const w of parts){
+    if(units[w] !== undefined) return units[w]
+    if(enUnits[w] !== undefined) return enUnits[w]
+  }
   return NaN
 }
 
@@ -126,9 +128,20 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
   const timerRef = useRef(null)
   const [imageUrl, setImageUrl] = useState('/puzzle-placeholder.svg')
   const [srMessage, setSrMessage] = useState('')
+  const [lastSpeech, setLastSpeech] = useState('')
+  const TIME_PER_QUESTION = 160000 // 2m40s fixed
 
   useEffect(()=>{
     findFirstExistingImage(POSSIBLE_IMAGES).then(u=>{ if(u) setImageUrl(u) })
+    // greeting on entry
+    setTimeout(()=>{
+      speakAndAnnounce('Selamat datang di Smart Inclusive Puzzle')
+      setTimeout(()=>{
+        speakAndAnnounce('Apakah Anda siap untuk memulai?')
+        setGameStage('confirm')
+        startListening()
+      }, 1500)
+    }, 500)
   },[])
 
   // create recognition once on mount; we will update its onresult callback
@@ -213,8 +226,9 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
 
   function isAffirmative(txt){
     if(!txt) return false
-    const t=txt.toLowerCase()
-    return /\b(iya|ya|mulai|oke|ok)\b/.test(t)
+    const t = txt.toLowerCase()
+    // accept a handful of affirmative tokens including some english words
+    return /\b(iya|ya|mulai|siap|ready|oke|ok|yes|start)\b/.test(t)
   }
 
   function restartGame(){
@@ -361,6 +375,7 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
         if (e.results && e.results.length > 0) {
           const txt = e.results[0][0].transcript.trim()
           console.log('Speech recognized:', txt)
+          setLastSpeech(txt)
           handleVoiceResult(txt)
         }
       }
@@ -369,6 +384,10 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
         if(gameStage === 'confirm' || gameStage === 'playing'){
           try{ r.start() }catch(e){}
         }
+      }
+      r.onerror = (e) => {
+        console.warn('recognition error', e)
+        setSrMessage('Masalah mikrofon, silakan periksa')
       }
     }
   }, [handleVoiceResult])
@@ -396,6 +415,7 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
   return (
     <div className="puzzle-wrapper">
       <div aria-live="polite" role="status" className="sr-only">{srMessage}</div>
+      <div className="debug-speech">{lastSpeech}</div>
       
       <div className="puzzle-board" role="application" aria-label="Puzzle board">
         {Array.from({ length: 16 }).map((_, gridIdx) => {
