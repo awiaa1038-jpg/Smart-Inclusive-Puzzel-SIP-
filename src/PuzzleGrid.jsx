@@ -120,6 +120,7 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
   const [gameStage, setGameStage] = useState('idle') // idle, confirm, countdown, playing, done
   const [countdownSec, setCountdownSec] = useState(5)
   const recognitionRef = useRef(null)
+  const placedOrderRef = useRef([]) // track placement order of piece ids
   // useRef allows us to refer to latest state in the handler without
   // needing to recreate the recognition object constantly
   const timerRef = useRef(null)
@@ -180,19 +181,34 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
   }
 
   function nextQuestion(){
-    if(currentIndex >= pieces.length){
+    const unplaced = pieces.filter(p => !p.placed)
+    if(!unplaced || unplaced.length === 0){
       speakAndAnnounce('Semua soal selesai. Terima kasih!')
       setGameStage('done')
       return
     }
     setGameStage('playing')
-    const q = pieces[currentIndex]
+    // choose a random unplaced piece to ask
+    const pick = unplaced[Math.floor(Math.random() * unplaced.length)]
+    const qIndex = pieces.findIndex(p => p.id === pick.id)
+    setCurrentIndex(qIndex)
+    const q = pieces[qIndex]
     speakAndAnnounce(q.question)
     startListening()
+    // per request: 2 minutes 40 seconds = 160000ms
     timerRef.current = setTimeout(() => {
       speakAndAnnounce('Waktu habis, mulai ulang dari awal')
-      restartGame()
-    }, 100000)
+      // on timeout, roll back last two placed pieces like a wrong answer
+      const toUnplace = []
+      for(let i=0;i<2;i++){
+        const lastId = placedOrderRef.current.pop()
+        if(lastId !== undefined) toUnplace.push(lastId)
+      }
+      if(toUnplace.length){
+        setPieces(prev => prev.map(p => toUnplace.includes(p.id) ? ({ ...p, placed:false, question: makeRandomSumQuestion(p), answer: makeRandomSumAnswer(p) }) : p))
+      }
+      setTimeout(() => nextQuestion(), 600)
+    }, 160000)
   }
 
   function isAffirmative(txt){
@@ -204,6 +220,7 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
   function restartGame(){
     // reset pieces and index
     setPieces((prev)=>prev.map(p=>({ ...p, placed:false })))
+    placedOrderRef.current = []
     setCurrentIndex(0)
     setGameStage('idle')
   }
@@ -269,12 +286,25 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
         stopListening()
         speakAndAnnounce('Anda benar')
         placePiece(q.id)
+        placedOrderRef.current.push(q.id)
         clearTimeout(timerRef.current)
-        setCurrentIndex(i => i+1)
+        // continue with next random unplaced piece
         nextQuestion()
       } else {
-        speakAndAnnounce('Maaf anda salah, mulai ulang dari awal ya..')
-        restartGame()
+        // wrong: remove last two placed pieces (if any) and regenerate them
+        speakAndAnnounce('Maaf anda salah, ulang 2 keping terakhir')
+        const toUnplace = []
+        for(let i=0;i<2;i++){
+          const lastId = placedOrderRef.current.pop()
+          if(lastId !== undefined) toUnplace.push(lastId)
+        }
+        if(toUnplace.length){
+          setPieces(prev => prev.map(p => toUnplace.includes(p.id) ? ({ ...p, placed:false, question: makeRandomSumQuestion(p), answer: makeRandomSumAnswer(p) }) : p))
+        }
+        // ask next random unplaced
+        setTimeout(() => {
+          nextQuestion()
+        }, 800)
       }
     }
   }, [pieces, currentIndex, gameStage])
@@ -291,6 +321,21 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
       }
       return next
     })
+  }
+
+  // helpers to generate random sum questions for regeneration after wrong
+  function makeRandomSumQuestion(p){
+    const a = Math.floor(Math.random()*9)+1
+    const b = Math.floor(Math.random()*9)+1
+    return `Berapa ${a} + ${b}?`
+  }
+  function makeRandomSumAnswer(p){
+    const match = /Berapa (\d+) \+ (\d+)\?/.exec(p.question || '')
+    if(match) return Number(match[1]) + Number(match[2])
+    // fallback random
+    const a = Math.floor(Math.random()*9)+1
+    const b = Math.floor(Math.random()*9)+1
+    return a + b
   }
 
   // `idx` is the index in the `pieces` array. the previous implementation
@@ -317,6 +362,12 @@ export default function PuzzleGrid({ questions, mode, onComplete }) {
           const txt = e.results[0][0].transcript.trim()
           console.log('Speech recognized:', txt)
           handleVoiceResult(txt)
+        }
+      }
+      // restart recognition automatically if it ends while we are in relevant stages
+      r.onend = () => {
+        if(gameStage === 'confirm' || gameStage === 'playing'){
+          try{ r.start() }catch(e){}
         }
       }
     }
